@@ -1,0 +1,33 @@
+plugins {
+    id 'com.github.johnrengelman.shadow' version '4.0.3'
+    id 'java'
+    id 'application'
+}
+
+group 'io.misterfix.mojangpipe'
+version '1.0'
+
+sourceCompatibility = 1.8
+mainClassName = 'io.misterfix.mojangpipe.MojangPipe'
+
+shadowJar {
+    classifier = null
+    version = null
+    manifest {
+        attributes 'Main-Class': mainClassName
+    }
+}
+
+compileJava {
+    options.encoding = 'UTF-8'
+}
+
+repositories {
+    jcenter()
+}
+
+dependencies {
+    compile "com.beust:jcommander:1.71"
+    compile 'com.sparkjava:spark-core:2.7.2'
+    compile 'com.squareup.okhttp3:okhttp:3.13.1'
+}
