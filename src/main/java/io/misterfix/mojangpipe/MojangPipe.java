@@ -6,8 +6,6 @@ import okhttp3.Request;
 import okhttp3.Response;
 import spark.Spark;
 
-import java.net.InetSocketAddress;
-import java.net.Proxy;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Map;
@@ -23,18 +21,18 @@ public class MojangPipe {
     private static Map<String, String> sessionProfiles = new ConcurrentHashMap<>(), apiUuidProfiles = new ConcurrentHashMap<>(), apiNamesProfiles = new ConcurrentHashMap<>();
     private static Map<String, Long> sessionRequests = new ConcurrentHashMap<>(), apiUuidRequests = new ConcurrentHashMap<>(), apiNamesRequests = new ConcurrentHashMap<>();
     private static Map<String, Object> stats = new ConcurrentHashMap<>();
-    private static Map<String, Integer> apiStatusCodes = new ConcurrentHashMap<>(), proxies  = new ConcurrentHashMap<String, Integer>() {{
-        put("127.0.0.1:3128", 0);
-        put("127.0.0.1:3129", 0);
-        put("127.0.0.1:3130", 0);
-        put("127.0.0.1:3131", 0);
-        put("127.0.0.1:3132", 0);
+    private static Map<String, Integer> apiStatusCodes = new ConcurrentHashMap<>();
+    private static Map<Integer, Integer> proxies = new ConcurrentHashMap<Integer, Integer>() {{
+        put(3128, 0);
+        put(3129, 0);
+        put(3130, 0);
+        put(3131, 0);
+        put(3132, 0);
     }};
 
     private static final ScheduledExecutorService threadPool = Executors.newScheduledThreadPool(10);
 
     public static void main(String[] args) {
-        OkHttpClient.Builder clientBuilder = Utils.getUnsafeOkHttpClient();
         Spark.port(port);
 
         Spark.get("/sessionserver/:uuid", (request, response) -> {
@@ -52,9 +50,7 @@ public class MojangPipe {
             }
             else{
                 Request apiRequest = new Request.Builder().url("https://sessionserver.mojang.com/session/minecraft/profile/"+uuid).build();
-                String[] proxy = Utils.getOptimalProxy(proxies, proxies.keySet()).split(":");
-                clientBuilder.proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxy[0], Integer.valueOf(proxy[1]))));
-                OkHttpClient client = clientBuilder.build();
+                OkHttpClient client = Utils.getClient(proxies);
                 Response apiResponse = client.newCall(apiRequest).execute();
 
                 int responseCode = apiResponse.code();
@@ -63,7 +59,6 @@ public class MojangPipe {
                 threadPool.execute(()->{
                     stats.put("profile_from_api", ((int)stats.getOrDefault("profile_from_api", 0))+1);
                     apiStatusCodes.put(responseCode+" "+apiResponse.message(), apiStatusCodes.getOrDefault(responseCode+" "+apiResponse.message(), 0)+1);
-                    proxies.put(proxy[0]+":"+proxy[1], proxies.get(proxy[0]+":"+proxy[1])+1);
                     System.out.println("Served profile for UUID "+uuid+" ("+apiResponse.code()+")");
                 });
 
@@ -97,9 +92,7 @@ public class MojangPipe {
             }
             else{
                 Request apiRequest = new Request.Builder().url("https://api.mojang.com/users/profiles/minecraft/"+name).build();
-                String[] proxy = Utils.getOptimalProxy(proxies, proxies.keySet()).split(":");
-                clientBuilder.proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxy[0], Integer.valueOf(proxy[1]))));
-                OkHttpClient client = clientBuilder.build();
+                OkHttpClient client = Utils.getClient(proxies);
                 Response apiResponse = client.newCall(apiRequest).execute();
 
                 int responseCode = apiResponse.code();
@@ -108,7 +101,6 @@ public class MojangPipe {
                 threadPool.execute(()->{
                     stats.put("uuid_from_api", ((int)stats.getOrDefault("uuid_from_api", 0))+1);
                     apiStatusCodes.put(responseCode+" "+apiResponse.message(), apiStatusCodes.getOrDefault(responseCode+" "+apiResponse.message(), 0)+1);
-                    proxies.put(proxy[0]+":"+proxy[1], proxies.get(proxy[0]+":"+proxy[1])+1);
                     System.out.println("Served UUID lookup for username "+name+" ("+apiResponse.code()+")");
                 });
 
@@ -142,9 +134,7 @@ public class MojangPipe {
             }
             else{
                 Request apiRequest = new Request.Builder().url("https://api.mojang.com/user/profiles/"+uuid+"/names").build();
-                String[] proxy = Utils.getOptimalProxy(proxies, proxies.keySet()).split(":");
-                clientBuilder.proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxy[0], Integer.valueOf(proxy[1]))));
-                OkHttpClient client = clientBuilder.build();
+                OkHttpClient client = Utils.getClient(proxies);
                 Response apiResponse = client.newCall(apiRequest).execute();
 
                 int responseCode = apiResponse.code();
@@ -153,7 +143,6 @@ public class MojangPipe {
                 threadPool.execute(()->{
                     stats.put("names_from_api", ((int)stats.getOrDefault("names_from_api", 0))+1);
                     apiStatusCodes.put(responseCode+" "+apiResponse.message(), apiStatusCodes.getOrDefault(responseCode+" "+apiResponse.message(), 0)+1);
-                    proxies.put(proxy[0]+":"+proxy[1], proxies.get(proxy[0]+":"+proxy[1])+1);
                     System.out.println("Served names list for UUID "+uuid+" ("+apiResponse.code()+")");
                 });
 
@@ -176,7 +165,7 @@ public class MojangPipe {
             StringBuilder responseCodeBreakdown = new StringBuilder();
             StringBuilder proxyUsageBreakdown = new StringBuilder();
             apiStatusCodes.forEach((code, count)-> responseCodeBreakdown.append("            <tr><td>").append(code).append(":</td><td> ").append(count).append("</td></tr>\n"));
-            proxies.forEach((proxy, count)-> proxyUsageBreakdown.append("            <tr><td>").append(proxy.split(":")[1]).append(":</td><td> ").append(count).append("</td></tr>\n"));
+            proxies.forEach((proxy, count) -> proxyUsageBreakdown.append("            <tr><td>").append(proxy).append(":</td><td> ").append(count).append("</td></tr>\n"));
             return "<html>\n" +
                 "    <head>\n" +
                 "        <title>Mojang pipe report</title>\n" +
@@ -233,5 +222,9 @@ public class MojangPipe {
         threadPool.scheduleAtFixedRate(()-> proxies.replaceAll((k, v)-> 0), 1, 1, TimeUnit.HOURS);
 
         Spark.awaitInitialization();
+    }
+
+    static Map<Integer, Integer> getProxies(){
+        return proxies;
     }
 }

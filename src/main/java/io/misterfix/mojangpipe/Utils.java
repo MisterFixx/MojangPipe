@@ -6,6 +6,8 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.text.DecimalFormat;
 import java.util.Map;
 import java.util.Set;
@@ -18,7 +20,8 @@ class Utils {
         return new DecimalFormat("#,##0.#").format(size/Math.pow(1024, digitGroups)) + " " + units[digitGroups];
     }
 
-    static OkHttpClient.Builder getUnsafeOkHttpClient(){
+    //I need this because of some weird issue on my VPS, it just spits exceptions and doesn't work without this
+    private static OkHttpClient.Builder getUnsafeOkHttpClient(){
         try{
             final TrustManager[] trustAllCerts = new TrustManager[]{
                     new X509TrustManager(){
@@ -44,10 +47,10 @@ class Utils {
         }
     }
 
-    static String getOptimalProxy(Map<String, Integer> map, Set<String> keys) {
-        String minKey = null;
+    private static int getOptimalProxy(Map<Integer, Integer> map, Set<Integer> keys){
+        int minKey = 0;
         int minValue = Integer.MAX_VALUE;
-        for(String key : keys) {
+        for (int key : keys) {
             int value = map.get(key);
             if(value < minValue) {
                 minValue = value;
@@ -55,5 +58,13 @@ class Utils {
             }
         }
         return minKey;
+    }
+
+    static OkHttpClient getClient(Map<Integer, Integer> proxies){
+        OkHttpClient.Builder clientBuilder = getUnsafeOkHttpClient();
+        int proxy = getOptimalProxy(proxies, proxies.keySet());
+        clientBuilder.proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress("127.0.0.1", proxy)));
+        MojangPipe.getProxies().put(proxy, MojangPipe.getProxies().get(proxy) + 1);
+        return clientBuilder.build();
     }
 }
