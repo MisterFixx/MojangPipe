@@ -26,3 +26,7 @@ To contribute:
 1. Fork the project.
 2. Make a branch for each thing you want to do (don't put everything in your master branch: I don't want to cherry-pick and I may not want everything).
 3. Send a pull request.
+
+Performance
+===========
+Currently, in the production environment, this system has managed to reduce the rate of `429` status codes from 3,000 `429`'s per 50,000 outgoing requests, to a single `429` per 50,000.

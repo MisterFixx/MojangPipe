@@ -39,7 +39,7 @@ public class MojangPipe {
             String uuid = request.params(":uuid");
             String json = "";
 
-            if(sessionRequests.containsKey(uuid) && (System.currentTimeMillis() - sessionRequests.get(uuid)) < 900000){
+            if(sessionRequests.containsKey(uuid) && (System.currentTimeMillis() - sessionRequests.get(uuid)) < 1800000){
                 json = sessionProfiles.get(uuid);
                 String finalJson = json;
                 threadPool.execute(()->{
@@ -81,7 +81,7 @@ public class MojangPipe {
             String name = request.params(":name");
             String json = "";
 
-            if(apiUuidRequests.containsKey(name) && (System.currentTimeMillis() - apiUuidRequests.get(name)) < 900000){
+            if(apiUuidRequests.containsKey(name) && (System.currentTimeMillis() - apiUuidRequests.get(name)) < 1800000){
                 json = apiUuidProfiles.get(name);
                 String finalJson = json;
                 threadPool.execute(()->{
@@ -123,7 +123,7 @@ public class MojangPipe {
             String uuid = request.params(":uuid");
             String json = "";
 
-            if(apiNamesRequests.containsKey(uuid) && (System.currentTimeMillis() - apiNamesRequests.get(uuid)) < 900000){
+            if(apiNamesRequests.containsKey(uuid) && (System.currentTimeMillis() - apiNamesRequests.get(uuid)) < 1800000){
                 json = apiNamesProfiles.get(uuid);
                 String finalJson = json;
                 threadPool.execute(()->{
@@ -200,19 +200,19 @@ public class MojangPipe {
 
         threadPool.scheduleAtFixedRate(()->{
             apiNamesRequests.forEach((uuid, time)->{
-                if((System.currentTimeMillis() - time) > 900000){
+                if((System.currentTimeMillis() - time) > 1800000){
                     apiNamesRequests.remove(uuid);
                     apiNamesProfiles.remove(uuid);
                 }
             });
             apiUuidRequests.forEach((uuid, time)->{
-                if((System.currentTimeMillis() - time) > 900000){
+                if((System.currentTimeMillis() - time) > 1800000){
                     apiUuidRequests.remove(uuid);
                     apiUuidProfiles.remove(uuid);
                 }
             });
             sessionRequests.forEach((uuid, time)->{
-                if((System.currentTimeMillis() - time) > 900000){
+                if((System.currentTimeMillis() - time) > 1800000){
                     sessionRequests.remove(uuid);
                     sessionProfiles.remove(uuid);
                 }
