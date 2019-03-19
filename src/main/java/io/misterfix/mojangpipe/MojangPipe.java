@@ -1,6 +1,7 @@
 package io.misterfix.mojangpipe;
 
 import com.beust.jcommander.Parameter;
+import okhttp3.ConnectionPool;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -13,10 +14,16 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class MojangPipe {
     @Parameter(names = {"--port"}, description = "The port on which the pipe service will run. Default 2580")
     private static final int port = 2580;
+    @Parameter(names = {"--maxIdleConnections"}, description = "The maximum amount of idle connections to keep in the connection pool. Default 100")
+    private static final int maxIdleConnections = 100;
+    @Parameter(names = {"--cacheLifetime"}, description = "Cache lifetime in minutes before it expires. Default 30")
+    private static final int cacheLifetime = 30;
 
     private static Map<String, String> sessionProfiles = new ConcurrentHashMap<>(), apiUuidProfiles = new ConcurrentHashMap<>(), apiNamesProfiles = new ConcurrentHashMap<>();
     private static Map<String, Long> sessionRequests = new ConcurrentHashMap<>(), apiUuidRequests = new ConcurrentHashMap<>(), apiNamesRequests = new ConcurrentHashMap<>();
@@ -31,15 +38,17 @@ public class MojangPipe {
     }};
 
     private static final ScheduledExecutorService threadPool = Executors.newScheduledThreadPool(10);
+    private static ConnectionPool connectionPool = new ConnectionPool(maxIdleConnections, 5, TimeUnit.MINUTES);
 
     public static void main(String[] args) {
-        Spark.port(port);
+        Logger.getLogger(OkHttpClient.class.getName()).setLevel(Level.FINE);
 
+        Spark.port(port);
         Spark.get("/sessionserver/:uuid", (request, response) -> {
             String uuid = request.params(":uuid");
             String json = "";
 
-            if(sessionRequests.containsKey(uuid) && (System.currentTimeMillis() - sessionRequests.get(uuid)) < 1800000){
+            if(sessionRequests.containsKey(uuid) && (System.currentTimeMillis() - sessionRequests.get(uuid)) < (cacheLifetime * 60000)){
                 json = sessionProfiles.get(uuid);
                 String finalJson = json;
                 threadPool.execute(()->{
@@ -50,7 +59,7 @@ public class MojangPipe {
             }
             else{
                 Request apiRequest = new Request.Builder().url("https://sessionserver.mojang.com/session/minecraft/profile/"+uuid).build();
-                OkHttpClient client = Utils.getClient(proxies);
+                OkHttpClient client = Utils.getClient(proxies, connectionPool);
                 Response apiResponse = client.newCall(apiRequest).execute();
 
                 int responseCode = apiResponse.code();
@@ -64,12 +73,13 @@ public class MojangPipe {
 
                 if(apiResponse.body() != null && responseCode == 200){
                     json = apiResponse.body().string();
+                    apiResponse.body().close();
+
+                    sessionProfiles.put(uuid, json);
+                    sessionRequests.put(uuid, System.currentTimeMillis());
+
                     String finalJson1 = json;
-                    threadPool.execute(()->{
-                        sessionProfiles.put(uuid, finalJson1);
-                        sessionRequests.put(uuid, System.currentTimeMillis());
-                        stats.put("bytes_served", ((long)stats.getOrDefault("bytes_served", 0L))+ finalJson1.length());
-                    });
+                    threadPool.execute(() -> stats.put("bytes_served", ((long) stats.getOrDefault("bytes_served", 0L)) + finalJson1.length()));
                 }
             }
 
@@ -81,7 +91,7 @@ public class MojangPipe {
             String name = request.params(":name");
             String json = "";
 
-            if(apiUuidRequests.containsKey(name) && (System.currentTimeMillis() - apiUuidRequests.get(name)) < 1800000){
+            if(apiUuidRequests.containsKey(name) && (System.currentTimeMillis() - apiUuidRequests.get(name)) < (cacheLifetime * 60000)){
                 json = apiUuidProfiles.get(name);
                 String finalJson = json;
                 threadPool.execute(()->{
@@ -92,7 +102,7 @@ public class MojangPipe {
             }
             else{
                 Request apiRequest = new Request.Builder().url("https://api.mojang.com/users/profiles/minecraft/"+name).build();
-                OkHttpClient client = Utils.getClient(proxies);
+                OkHttpClient client = Utils.getClient(proxies, connectionPool);
                 Response apiResponse = client.newCall(apiRequest).execute();
 
                 int responseCode = apiResponse.code();
@@ -106,12 +116,13 @@ public class MojangPipe {
 
                 if(apiResponse.body() != null && responseCode == 200){
                     json = apiResponse.body().string();
+                    apiResponse.body().close();
+
+                    apiUuidProfiles.put(name, json);
+                    apiUuidRequests.put(name, System.currentTimeMillis());
+
                     String finalJson1 = json;
-                    threadPool.execute(()->{
-                        apiUuidProfiles.put(name, finalJson1);
-                        apiUuidRequests.put(name, System.currentTimeMillis());
-                        stats.put("bytes_served", ((long)stats.getOrDefault("bytes_served", 0L))+ finalJson1.length());
-                    });
+                    threadPool.execute(() -> stats.put("bytes_served", ((long) stats.getOrDefault("bytes_served", 0L)) + finalJson1.length()));
                 }
             }
 
@@ -123,7 +134,7 @@ public class MojangPipe {
             String uuid = request.params(":uuid");
             String json = "";
 
-            if(apiNamesRequests.containsKey(uuid) && (System.currentTimeMillis() - apiNamesRequests.get(uuid)) < 1800000){
+            if(apiNamesRequests.containsKey(uuid) && (System.currentTimeMillis() - apiNamesRequests.get(uuid)) < (cacheLifetime * 60000)){
                 json = apiNamesProfiles.get(uuid);
                 String finalJson = json;
                 threadPool.execute(()->{
@@ -134,8 +145,9 @@ public class MojangPipe {
             }
             else{
                 Request apiRequest = new Request.Builder().url("https://api.mojang.com/user/profiles/"+uuid+"/names").build();
-                OkHttpClient client = Utils.getClient(proxies);
+                OkHttpClient client = Utils.getClient(proxies, connectionPool);
                 Response apiResponse = client.newCall(apiRequest).execute();
+
 
                 int responseCode = apiResponse.code();
                 response.status(responseCode);
@@ -148,12 +160,13 @@ public class MojangPipe {
 
                 if(apiResponse.body() != null && responseCode == 200){
                     json = apiResponse.body().string();
+                    apiResponse.body().close();
+
+                    apiNamesProfiles.put(uuid, json);
+                    apiNamesRequests.put(uuid, System.currentTimeMillis());
+
                     String finalJson1 = json;
-                    threadPool.execute(()->{
-                        apiNamesProfiles.put(uuid, finalJson1);
-                        apiNamesRequests.put(uuid, System.currentTimeMillis());
-                        stats.put("bytes_served", ((long)stats.getOrDefault("bytes_served", 0L))+finalJson1.length());
-                    });
+                    threadPool.execute(() -> stats.put("bytes_served", ((long) stats.getOrDefault("bytes_served", 0L)) + finalJson1.length()));
                 }
             }
 
@@ -161,11 +174,11 @@ public class MojangPipe {
             return json;
         });
 
-        Spark.get("/stats", ((request, response) -> {
+        Spark.get("/stats", (request, response) -> {
             StringBuilder responseCodeBreakdown = new StringBuilder();
             StringBuilder proxyUsageBreakdown = new StringBuilder();
-            apiStatusCodes.forEach((code, count)-> responseCodeBreakdown.append("            <tr><td>").append(code).append(":</td><td> ").append(count).append("</td></tr>\n"));
-            proxies.forEach((proxy, count) -> proxyUsageBreakdown.append("            <tr><td>").append(proxy).append(":</td><td> ").append(count).append("</td></tr>\n"));
+            apiStatusCodes.forEach((code, count) -> responseCodeBreakdown.append("<tr><td>").append(code).append(":</td><td> ").append(count).append("</td></tr>\n"));
+            proxies.forEach((proxy, count) -> proxyUsageBreakdown.append("<tr><td>").append(proxy).append(":</td><td> ").append(count).append("</td></tr>\n"));
             return "<html>\n" +
                 "    <head>\n" +
                 "        <title>Mojang pipe report</title>\n" +
@@ -174,12 +187,14 @@ public class MojangPipe {
                 "        <table>\n" +
                 "            <tr><td>Time</td><td> "+new SimpleDateFormat("yyyy-MM-dd HH:mm").format(new Date())+"</td></tr>\n" +
                 "            <tr><td>Bytes served</td><td> "+Utils.readableFileSize((long)stats.getOrDefault("bytes_served", 0L))+"</td></tr>\n" +
+                    "            <tr><td>Connections</td><td> " + connectionPool.connectionCount() + "</td></tr>\n" +
+                    "            <tr><td>Idle Connections</td><td> " + connectionPool.idleConnectionCount() + "</td></tr>\n" +
                 "            <tr><td>----------------------------------------</td><td>-----------------------</td></tr>\n"+
                 "            <tr><td>Requests served from memory&nbsp;&nbsp;&nbsp;</td><td> "+(((int)stats.getOrDefault("profile_from_mem", 0))+((int)stats.getOrDefault("uuid_from_mem", 0))+((int)stats.getOrDefault("names_from_mem", 0)))+"</td></tr>\n" +
                 "            <tr><td>Requests served from API</td><td> "+(((int)stats.getOrDefault("profile_from_api", 0))+((int)stats.getOrDefault("uuid_from_api", 0))+((int)stats.getOrDefault("names_from_api", 0)))+"</td></tr>\n" +
                 "            <tr><td>----------------------------------------</td><td>-----------------------</td></tr>\n"+
                 "            <tr><td>Profile requests</td><td> "+(((int)stats.getOrDefault("profile_from_mem", 0))+((int)stats.getOrDefault("profile_from_api", 0)))+"</td></tr>\n" +
-                "            <tr><td>UUID requests</td><td> "+(((int)stats.getOrDefault("uuid_from_mem", 0))+((int)stats.getOrDefault("uuid_from_api", 0)))+"</td></tr>\n" +
+                    "            <tr><td>Name requests</td><td> " + (((int) stats.getOrDefault("uuid_from_mem", 0)) + ((int) stats.getOrDefault("uuid_from_api", 0))) + "</td></tr>\n" +
                 "            <tr><td>Name list requests</td><td> "+(((int)stats.getOrDefault("names_from_mem", 0))+((int)stats.getOrDefault("names_from_api", 0)))+"</td></tr>\n" +
                 "            <tr><td>Total requests served</td><td> "+(((int)stats.getOrDefault("profile_from_mem", 0))+((int)stats.getOrDefault("uuid_from_mem", 0))+((int)stats.getOrDefault("names_from_mem", 0))+((int)stats.getOrDefault("profile_from_api", 0))+((int)stats.getOrDefault("uuid_from_api", 0))+((int)stats.getOrDefault("names_from_api", 0)))+"</td></tr>\n" +
                 "            <tr><td>----------------------------------------</td><td>-----------------------</td></tr>\n"+
@@ -194,25 +209,26 @@ public class MojangPipe {
                 "            <tr><td>Used memory</td><td> "+Utils.readableFileSize(Runtime.getRuntime().totalMemory()-Runtime.getRuntime().freeMemory())+"</td></tr>\n"+
                 "        </table>\n" +
                 "    </body>\n" +
-                "</html>";}));
+                    "</html>";
+        });
 
         Spark.exception(Exception.class, (e, req, res) -> e.printStackTrace());
 
         threadPool.scheduleAtFixedRate(()->{
             apiNamesRequests.forEach((uuid, time)->{
-                if((System.currentTimeMillis() - time) > 1800000){
+                if((System.currentTimeMillis() - time) > (cacheLifetime * 60000)){
                     apiNamesRequests.remove(uuid);
                     apiNamesProfiles.remove(uuid);
                 }
             });
             apiUuidRequests.forEach((uuid, time)->{
-                if((System.currentTimeMillis() - time) > 1800000){
+                if((System.currentTimeMillis() - time) > (cacheLifetime * 60000)){
                     apiUuidRequests.remove(uuid);
                     apiUuidProfiles.remove(uuid);
                 }
             });
             sessionRequests.forEach((uuid, time)->{
-                if((System.currentTimeMillis() - time) > 1800000){
+                if((System.currentTimeMillis() - time) > (cacheLifetime * 60000)){
                     sessionRequests.remove(uuid);
                     sessionProfiles.remove(uuid);
                 }
