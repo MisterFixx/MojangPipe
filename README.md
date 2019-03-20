@@ -21,6 +21,11 @@ Solution
 ### Proxy ports
 Since Squid is configured to send requests through each one of its IPs depending on which port it was connected to, and squid is hosted locally on the same machine is the relay server, i didn't bother writing MojangPipe in a way that would let each server address in the proxies HashMap to be customized, instead, it just stores the ports on which squid runs and selects a port based on the number of requests that were made through that port within the last hour.
 
+Squid
+=====
+We use Squid as our HTTP proxy server, hosted locally on the same machine as the MojangPipe instance.
+[Here](https://www.tecmint.com/install-squid-in-ubuntu/) is a quick guide on how to install Squid, and [the config file we used](https://gist.github.com/MisterFixx/96b2b3490ef0bc7a2edd69d589717fa1) for squid.
+
 Performance
 ===========
 Currently, in the production environment, this system has managed to reduce the rate of `429` status codes from 3,000 `429`'s per 50,000 outgoing requests, to a single `429` per 50,000.
