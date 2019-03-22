@@ -32,4 +32,5 @@ dependencies {
     compile 'com.squareup.okhttp3:okhttp:3.13.1'
     compile "org.slf4j:slf4j-api:1.6.1"
     compile "org.slf4j:slf4j-simple:1.6.1"
+    compile 'org.json:json:20180813'
 }
