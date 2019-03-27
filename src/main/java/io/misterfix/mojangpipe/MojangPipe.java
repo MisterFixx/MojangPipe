@@ -59,13 +59,15 @@ public class MojangPipe {
                     stats.put("profile_from_mem", ((int) stats.getOrDefault("profile_from_api", 0)) + 1);
                     System.out.println("Served profile for UUID " + uuid + " (from invalid requests cache)");
                 });
-            } else if(sessionRequests.containsKey(uuid) && (time - sessionRequests.get(uuid)) < (cacheLifetime * 60000)){
+            }
+            else if(sessionRequests.containsKey(uuid) && (time - sessionRequests.get(uuid)) < (cacheLifetime * 60000)){
                 json = sessionProfiles.get(uuid);
                 threadPool.execute(()->{
                     stats.put("profile_from_mem", ((int)stats.getOrDefault("profile_from_mem", 0))+1);
                     System.out.println("Served profile for UUID "+uuid+" (from memory)");
                 });
-            } else {
+            }
+            else {
                 Request apiRequest = new Request.Builder().url("https://sessionserver.mojang.com/session/minecraft/profile/"+uuid).build();
                 OkHttpClient client = Utils.getClient(proxies, connectionPool);
                 Response apiResponse = client.newCall(apiRequest).execute();
@@ -84,7 +86,8 @@ public class MojangPipe {
                     apiResponse.body().close();
                     sessionProfiles.put(uuid, json);
                     sessionRequests.put(uuid, time);
-                } else if(responseCode == 204){
+                }
+                else if(responseCode == 204){
                     invalidRequests.put(uuid, time);
                 }
             }
@@ -134,7 +137,8 @@ public class MojangPipe {
                     apiResponse.body().close();
                     apiUuidProfiles.put(name, json);
                     apiUuidRequests.put(name, time);
-                } else if(responseCode == 204){
+                }
+                else if(responseCode == 204){
                     invalidRequests.put(name, time);
                 }
             }
@@ -209,13 +213,15 @@ public class MojangPipe {
                     stats.put("name_profile_from_mem", ((int) stats.getOrDefault("name_profile_from_mem", 0)) + 1);
                     System.out.println("Served profile lookup for name " + name + " (from invalid requests cache)");
                 });
-            } else if(nameProfileRequests.containsKey(name) && (time - nameProfileRequests.get(name)) < (cacheLifetime * 60000)){
+            }
+            else if(nameProfileRequests.containsKey(name) && (time - nameProfileRequests.get(name)) < (cacheLifetime * 60000)){
                 json = nameProfileProfiles.get(name);
                 threadPool.execute(() -> {
                     stats.put("name_profile_from_mem", ((int) stats.getOrDefault("name_profile_from_mem", 0)) + 1);
                     System.out.println("Served profile lookup for name " + name + " (from memory)");
                 });
-            } else {
+            }
+            else {
                 Request apiRequest = new Request.Builder().url("https://api.mojang.com/users/profiles/minecraft/" + name).build();
                 OkHttpClient client = Utils.getClient(proxies, connectionPool);
                 Response apiResponse = client.newCall(apiRequest).execute();
@@ -227,11 +233,10 @@ public class MojangPipe {
                     String responseString = apiResponse.body().string();
                     apiResponse.body().close();
                     threadPool.execute(() -> {
-                        apiUuidProfiles.put(name, responseString);
                         apiUuidRequests.put(name, time);
+                        apiUuidProfiles.put(name, responseString);
                     });
-                    JSONObject responseJson = new JSONObject(responseString);
-                    String uuid = responseJson.getString("id");
+                    String uuid = new JSONObject(responseString).getString("id");
 
                     if(sessionRequests.containsKey(uuid) && (time - sessionRequests.get(uuid)) < (cacheLifetime * 60000)){
                         json = sessionProfiles.get(uuid);
@@ -239,7 +244,8 @@ public class MojangPipe {
                             stats.put("uuid_from_mem", ((int) stats.getOrDefault("uuid_from_mem", 0)) + 1);
                             System.out.println("Served profile lookup for name " + name + " (partly from memory)");
                         });
-                    } else {
+                    }
+                    else {
                         Request sessionRequest = new Request.Builder().url("https://sessionserver.mojang.com/session/minecraft/profile/" + uuid).build();
                         Response sessionResponse = client.newCall(sessionRequest).execute();
                         int responseCode = sessionResponse.code();
@@ -248,23 +254,26 @@ public class MojangPipe {
                         threadPool.execute(() -> {
                             stats.put("name_profile_from_api", ((int) stats.getOrDefault("name_profile_from_api", 0)) + 1);
                             apiStatusCodes.put(responseCode + " " + sessionResponse.message(), apiStatusCodes.getOrDefault(responseCode + " " + sessionResponse.message(), 0) + 1);
-                            System.out.println("Served profile lookup for name " + name + " (" + sessionResponse.code() + ")");
+                            System.out.println("Served profile lookup for name " + name + " (" + responseCode + ")");
                         });
 
                         if(sessionResponse.body() != null && responseCode == 200){
                             json = sessionResponse.body().string();
                             sessionResponse.body().close();
-                            nameProfileProfiles.put(name, json);
                             nameProfileRequests.put(name, time);
-                            sessionProfiles.put(uuid, json);
                             sessionRequests.put(uuid, time);
-                        } else if(responseCode == 204){
+                            nameProfileProfiles.put(name, json);
+                            sessionProfiles.put(uuid, json);
+                        }
+                        else if(responseCode == 204){
                             invalidRequests.put(uuid, time);
+                            invalidRequests.put(name, time);
                         }
                     }
-                } else if(apiResponseCode == 204){
+                }
+                else if(apiResponseCode == 204){
                     invalidRequests.put(name, time);
-                    System.out.println("Served profile for name " + name + " (" + apiResponse.code() + ")");
+                    System.out.println("Served profile lookup for name " + name + " (" + apiResponse.code() + ")");
                 }
             }
 
@@ -288,24 +297,24 @@ public class MojangPipe {
                 "    <body>\n" +
                 "        <table>\n" +
                 "            <tr><td>Time</td><td> "+new SimpleDateFormat("yyyy-MM-dd HH:mm").format(new Date())+"</td></tr>\n" +
-                    "            <tr><td>Connections</td><td> " + connectionPool.connectionCount() + "</td></tr>\n" +
-                    "            <tr><td>Idle Connections</td><td> " + connectionPool.idleConnectionCount() + "</td></tr>\n" +
+                "            <tr><td>Connections</td><td> " + connectionPool.connectionCount() + "</td></tr>\n" +
+                "            <tr><td>Idle Connections</td><td> " + connectionPool.idleConnectionCount() + "</td></tr>\n" +
                 "            <tr><td>----------------------------------------</td><td>-----------------------</td></tr>\n"+
-                    "            <tr><td>Requests served from memory&nbsp;&nbsp;</td><td> " + (((int) stats.getOrDefault("profile_from_mem", 0)) + ((int) stats.getOrDefault("uuid_from_mem", 0)) + ((int) stats.getOrDefault("names_from_mem", 0)) + ((int) stats.getOrDefault("uuid_from_mem", 0)) + ((int) stats.getOrDefault("name_profile_from_mem", 0))) + "</td></tr>\n" +
-                    "            <tr><td>Requests served from API</td><td> " + (((int) stats.getOrDefault("profile_from_api", 0)) + ((int) stats.getOrDefault("uuid_from_api", 0)) + ((int) stats.getOrDefault("names_from_api", 0)) + ((int) stats.getOrDefault("name_profile_from_api", 0))) + "</td></tr>\n" +
-                    "            <tr><td>Outgoing API requests</td><td> " + outgoingRequests.get() + "</td></tr>\n" +
+                "            <tr><td>Requests served from memory&nbsp;&nbsp;</td><td> " + (((int) stats.getOrDefault("profile_from_mem", 0)) + ((int) stats.getOrDefault("uuid_from_mem", 0)) + ((int) stats.getOrDefault("names_from_mem", 0)) + ((int) stats.getOrDefault("uuid_from_mem", 0)) + ((int) stats.getOrDefault("name_profile_from_mem", 0))) + "</td></tr>\n" +
+                "            <tr><td>Requests served from API</td><td> " + (((int) stats.getOrDefault("profile_from_api", 0)) + ((int) stats.getOrDefault("uuid_from_api", 0)) + ((int) stats.getOrDefault("names_from_api", 0)) + ((int) stats.getOrDefault("name_profile_from_api", 0))) + "</td></tr>\n" +
+                "            <tr><td>Outgoing API requests</td><td> " + outgoingRequests.get() + "</td></tr>\n" +
                 "            <tr><td>----------------------------------------</td><td>-----------------------</td></tr>\n"+
                 "            <tr><td>Profile requests</td><td> "+(((int)stats.getOrDefault("profile_from_mem", 0))+((int)stats.getOrDefault("profile_from_api", 0)))+"</td></tr>\n" +
-                    "            <tr><td>Name requests</td><td> " + (((int) stats.getOrDefault("uuid_from_mem", 0)) + ((int) stats.getOrDefault("uuid_from_api", 0))) + "</td></tr>\n" +
+                "            <tr><td>Name requests</td><td> " + (((int) stats.getOrDefault("uuid_from_mem", 0)) + ((int) stats.getOrDefault("uuid_from_api", 0))) + "</td></tr>\n" +
                 "            <tr><td>Name list requests</td><td> "+(((int)stats.getOrDefault("names_from_mem", 0))+((int)stats.getOrDefault("names_from_api", 0)))+"</td></tr>\n" +
-                    "            <tr><td>Name profile requests</td><td> " + (((int) stats.getOrDefault("name_profile_from_mem", 0)) + ((int) stats.getOrDefault("name_profile_from_api", 0))) + "</td></tr>\n" +
-                    "            <tr><td>Total requests served</td><td> " + (((int) stats.getOrDefault("profile_from_mem", 0)) + ((int) stats.getOrDefault("uuid_from_mem", 0)) + ((int) stats.getOrDefault("names_from_mem", 0)) + ((int) stats.getOrDefault("profile_from_api", 0)) + ((int) stats.getOrDefault("uuid_from_api", 0)) + ((int) stats.getOrDefault("names_from_api", 0)) + ((int) stats.getOrDefault("name_profile_from_mem", 0)) + ((int) stats.getOrDefault("name_profile_from_api", 0))) + "</td></tr>\n" +
+                "            <tr><td>Name profile requests</td><td> " + (((int) stats.getOrDefault("name_profile_from_mem", 0)) + ((int) stats.getOrDefault("name_profile_from_api", 0))) + "</td></tr>\n" +
+                "            <tr><td>Total requests served</td><td> " + (((int) stats.getOrDefault("profile_from_mem", 0)) + ((int) stats.getOrDefault("uuid_from_mem", 0)) + ((int) stats.getOrDefault("names_from_mem", 0)) + ((int) stats.getOrDefault("profile_from_api", 0)) + ((int) stats.getOrDefault("uuid_from_api", 0)) + ((int) stats.getOrDefault("names_from_api", 0)) + ((int) stats.getOrDefault("name_profile_from_mem", 0)) + ((int) stats.getOrDefault("name_profile_from_api", 0))) + "</td></tr>\n" +
                 "            <tr><td>----------------------------------------</td><td>-----------------------</td></tr>\n"+
                 "            <tr><td>Profiles in memory</td><td> "+sessionProfiles.size()+"</td></tr>\n"+
                 "            <tr><td>UUIDs in memory</td><td> "+ apiUuidProfiles.size()+"</td></tr>\n"+
                 "            <tr><td>Name lists in memory</td><td> "+apiNamesProfiles.size()+"</td></tr>\n"+
-                    "            <tr><td>Name profiles in memory</td><td> " + nameProfileProfiles.size() + "</td></tr>\n" +
-                    "            <tr><td>Invalid requests in memory</td><td> " + invalidRequests.size() + "</td></tr>\n" +
+                "            <tr><td>Name profiles in memory</td><td> " + nameProfileProfiles.size() + "</td></tr>\n" +
+                "            <tr><td>Invalid requests in memory</td><td> " + invalidRequests.size() + "</td></tr>\n" +
                 "            <tr><td>---Response codes breakdown---</td><td>-----------------------</td></tr>\n"+
                              responseCodeBreakdown.toString()+
                 "            <tr><td>-----Proxy usage breakdown-----</td><td>-----------------------</td></tr>\n"+
@@ -335,6 +344,12 @@ public class MojangPipe {
                 if((System.currentTimeMillis() - time) > (cacheLifetime * 60000)){
                     sessionRequests.remove(uuid);
                     sessionProfiles.remove(uuid);
+                }
+            });
+            nameProfileRequests.forEach((name, time) -> {
+                if((System.currentTimeMillis() - time) > (cacheLifetime * 60000)){
+                    nameProfileProfiles.remove(name);
+                    nameProfileProfiles.remove(name);
                 }
             });
             invalidRequests.forEach((name, time) -> {
