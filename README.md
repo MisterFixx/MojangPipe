@@ -13,6 +13,7 @@ Solution
   * [SparkJava Web app micro framework](http://sparkjava.com/)
   * [Squid HTTP proxy server](http://www.squid-cache.org/)
   * [OkHTTP 3](https://square.github.io/okhttp/)
+  * [Redis](https://redis.io) 
   * Order of operation per request:
     * Checking if there was already a failed attempt to serve this request within the last 4 hours - if there was, just return 204 status code with a blank body.
     * If there was not - checking if this request was already successfully served within the last 30 minutes - if it was, serve the cached version.
@@ -28,7 +29,7 @@ Since Squid is configured to send requests through each one of its IPs depending
 
 Performance
 ===========
-Currently, in the production environment, this system has managed to reduce the rate of `429` status codes from 3,000 `429`'s per 50,000 outgoing requests, to a single `429` per 50,000 requests.
+Currently, in the production environment, this system has managed to reduce the rate of `429` status codes from 6% (of all outgoing requests to Mojang), to ~0.8 - 0.5%.
 
 # Contributing
 To contribute:

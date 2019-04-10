@@ -1,6 +1,6 @@
 package io.misterfix.mojangpipe;
 
-import okhttp3.ConnectionPool;
+import io.lettuce.core.api.sync.RedisCommands;
 import okhttp3.OkHttpClient;
 
 import java.net.InetSocketAddress;
@@ -17,25 +17,27 @@ class Utils {
         return new DecimalFormat("#,##0.#").format(size/Math.pow(1024, digitGroups)) + " " + units[digitGroups];
     }
 
-    private static int getOptimalProxy(Map<Integer, Integer> map, Set<Integer> keys){
+    private static int getOptimalProxy(Map<String, String> map, Set<String> keys){
         int minKey = 0;
-        int minValue = Integer.MAX_VALUE;
-        for (int key : keys) {
-            int value = map.get(key);
+        long minValue = Long.MAX_VALUE;
+        for (String key : keys) {
+            long value = Long.valueOf(map.get(key));
             if(value < minValue) {
                 minValue = value;
-                minKey = key;
+                minKey = Integer.valueOf(key);
             }
         }
         return minKey;
     }
 
-    static OkHttpClient getClient(Map<Integer, Integer> proxies, ConnectionPool connectionPool){
+    static OkHttpClient getClient(){
+        RedisCommands<String, String> redis = MojangPipe.getRedis();
+        redis.select(0);
+        Map<String, String> proxies = redis.hgetall("proxies");
         OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder();
-        clientBuilder.connectionPool(connectionPool);
         int proxy = getOptimalProxy(proxies, proxies.keySet());
         clientBuilder.proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress("127.0.0.1", proxy)));
-        MojangPipe.getProxies().put(proxy, MojangPipe.getProxies().get(proxy) + 1);
+        redis.hmset("proxies", Map.of(String.valueOf(proxy), Long.toString(System.currentTimeMillis())));
         return clientBuilder.build();
     }
 }

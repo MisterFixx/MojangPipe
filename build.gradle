@@ -5,9 +5,9 @@ plugins {
 }
 
 group 'io.misterfix.mojangpipe'
-version '1.1'
+version '2'
 
-sourceCompatibility = 1.8
+sourceCompatibility = 11
 mainClassName = 'io.misterfix.mojangpipe.MojangPipe'
 
 shadowJar {
@@ -27,10 +27,10 @@ repositories {
 }
 
 dependencies {
-    compile "com.beust:jcommander:1.71"
-    compile 'com.sparkjava:spark-core:2.7.2'
-    compile 'com.squareup.okhttp3:okhttp:3.13.1'
-    compile "org.slf4j:slf4j-api:1.6.1"
-    compile "org.slf4j:slf4j-simple:1.6.1"
+    compile 'net.sf.jopt-simple:jopt-simple:6.0-alpha-3'
+    compile 'com.sparkjava:spark-core:2.8.0'
+    compile 'com.squareup.okhttp3:okhttp:3.14.0'
+    compile "org.slf4j:slf4j-simple:1.7.26"
     compile 'org.json:json:20180813'
+    compile 'io.lettuce:lettuce-core:5.1.6.RELEASE'
 }
