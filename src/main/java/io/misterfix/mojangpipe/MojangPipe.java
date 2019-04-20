@@ -21,11 +21,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import static spark.Spark.halt;
+
 public class MojangPipe {
     private static long startTime;
     private static OkHttpClient client;
     private static RedisCommands<String, String> redis;
-    private static final ScheduledExecutorService threadPool = Executors.newScheduledThreadPool(5);
+    private static final ScheduledExecutorService threadPool = Executors.newScheduledThreadPool(300);
     private static final String API_URL = "https://api.mojang.com/users/profiles/minecraft/";
     private static final String SESSION_URL = "https://sessionserver.mojang.com/session/minecraft/profile/";
 
@@ -52,20 +54,25 @@ public class MojangPipe {
 
         System.out.println("Starting relay server on port "+options.valueOf(optPort));
         Spark.port(options.valueOf(optPort));
-        Spark.get("/sessionserver/:uuid", (request, response) -> {
-            String uuid = request.params(":uuid");
-            if(uuid.length() != 32 && uuid.length() != 36){
-                response.status(400);
-                return "";
-            }
+        Spark.threadPool(300, 20, 5000);
+
+        Spark.get("/sessionserver/*", (request, response) -> {
+            if(request.splat().length == 0) halt(400);
+            String[] route = request.splat()[0].split("/");
+            if(route.length < 1) halt(400);
+
+            String uuid = route[0];
+            if(uuid.length() != 32) halt(400);
+            Ratelimit.checkAndAdd(uuid);
             long time = System.currentTimeMillis();
+            boolean texturesOnly = route.length == 2 && route[1].equalsIgnoreCase("textures");
             String json = "";
 
             if((time - Redis.getLastRequest(uuid, 5)) < (invalidLifetime * 60000)){
                 response.status(204);
                 threadPool.execute(() -> {
-                    Redis.incrStats("profile_from_mem");
-                    System.out.println("Served profile for UUID " + uuid + " (from invalid requests cache)");
+                    Redis.incrStats("served_from_invalid_cache");
+                    System.out.println("Served profile for UUID "+uuid+" (from invalid requests cache)");
                 });
             }
             else if((time - Redis.getLastRequest(uuid,1)) < (cacheLifetime * 60000)){
@@ -99,22 +106,21 @@ public class MojangPipe {
             }
 
             response.type("Application/json");
-            return json;
+            Ratelimit.remove(uuid);
+            if(texturesOnly && !json.isEmpty()) return Utils.getTextures(json);
+            else return json;
         });
 
         Spark.get("/api/name/:name", (request, response) -> {
             String name = request.params(":name");
-            if(name.length() > 17){
-                response.status(400);
-                return "";
-            }
+            if(name.length() > 17) halt(400);
             long time = System.currentTimeMillis();
             String json = "";
 
             if((time - Redis.getLastRequest(name, 5)) < (invalidLifetime * 60000)){
                 response.status(204);
                 threadPool.execute(() -> {
-                    Redis.incrStats("uuid_from_mem");
+                    Redis.incrStats("served_from_invalid_cache");
                     System.out.println("Served UUID lookup for username " + name + " (from invalid requests cache)");
                 });
             }
@@ -154,17 +160,14 @@ public class MojangPipe {
 
         Spark.get("/api/names/:uuid", (request, response) -> {
             String uuid = request.params(":uuid");
-            if(uuid.length() != 32 && uuid.length() != 36){
-                response.status(400);
-                return "";
-            }
+            if(uuid.length() != 32) halt(400);
             long time = System.currentTimeMillis();
             String json = "";
 
             if((time - Redis.getLastRequest(uuid, 5)) < (invalidLifetime * 60000)){
                 response.status(204);
                 threadPool.execute(() -> {
-                    Redis.incrStats("names_from_mem");
+                    Redis.incrStats("served_from_invalid_cache");
                     System.out.println("Served names list for UUID " + uuid + " (from invalid requests cache)");
                 });
             }
@@ -202,27 +205,30 @@ public class MojangPipe {
             return json;
         });
 
-        Spark.get("/pipe/profile/:name", (request, response) -> {
-            String name = request.params(":name");
-            if(name.length() > 17){
-                response.status(400);
-                return "";
-            }
+        Spark.get("/pipe/profile/*", (request, response) -> {
+            if(request.splat().length == 0) halt(400);
+            String[] route = request.splat()[0].split("/");
+            if(route.length < 1) halt(400);
+
+            String name = route[0];
+            if(name.length() > 17) halt(400);
+            Ratelimit.checkAndAdd(name);
             long time = System.currentTimeMillis();
+            boolean texturesOnly = route.length == 2 && route[1].equalsIgnoreCase("textures");
             String json = "";
 
             if((time - Redis.getLastRequest(name, 5)) < (invalidLifetime * 60000)){
                 response.status(204);
                 threadPool.execute(() -> {
-                    Redis.incrStats("name_profile_from_mem");
-                    System.out.println("Served profile lookup for name " + name + " (from invalid requests cache)");
+                    Redis.incrStats("served_from_invalid_cache");
+                    System.out.println("Served profile for name " + name + " (from invalid requests cache)");
                 });
             }
             else if((time - Redis.getLastRequest(name, 4)) < (cacheLifetime * 60000)){
                 json = Redis.getJson(name, 4);
                 threadPool.execute(() -> {
                     Redis.incrStats("name_profile_from_mem");
-                    System.out.println("Served profile lookup for name " + name + " (from memory)");
+                    System.out.println("Served profile for name " + name + " (from memory)");
                 });
             }
             else {
@@ -231,17 +237,19 @@ public class MojangPipe {
                 ResponseBody apiBody = apiResponse.body();
                 int apiResponseCode = apiResponse.code();
 
-                threadPool.execute(() -> Redis.logStatusMessage(apiResponseCode + " " + apiResponse.message()));
+                threadPool.execute(() -> Redis.logStatusMessage(apiResponseCode+" "+apiResponse.message()));
                 if(apiBody != null && apiResponseCode == 200){
                     String responseString = apiBody.string();
                     threadPool.execute(() -> Redis.putJson(name, time, responseString, 2));
                     String uuid = new JSONObject(responseString).getString("id");
+                    Ratelimit.add(uuid);
 
                     if((time - Redis.getLastRequest(uuid, 1)) < (cacheLifetime * 60000)){
                         json = Redis.getJson(uuid, 1);
+                        Redis.putJson(name, time, json, 4);
                         threadPool.execute(() -> {
                             Redis.incrStats("uuid_from_mem");
-                            System.out.println("Served profile lookup for name " + name + " (partly from memory)");
+                            System.out.println("Served profile for name "+name+" (partly from memory)");
                         });
                     }
                     else {
@@ -253,32 +261,33 @@ public class MojangPipe {
                         threadPool.execute(() -> {
                             Redis.incrStats("name_profile_from_api");
                             Redis.logStatusMessage(sessionResponse.code()+" "+sessionResponse.message());
-                            System.out.println("Served profile lookup for name " + name + " (" + responseCode + ")");
+                            System.out.println("Served profile for name "+name+" ("+responseCode+")");
                         });
                         if(sessionBody != null && responseCode == 200){
                             json = sessionBody.string();
                             Redis.putJson(name, time, json, 4);
-
-                            String finalJson = json;
-                            threadPool.execute(() -> Redis.putJson(uuid, time, finalJson, 1));
+                            Redis.putJson(uuid, time, json, 1);
                         }
                         else{
                             Redis.handleStatusCode(apiResponseCode, name);
-                            threadPool.execute(() -> Redis.handleStatusCode(apiResponseCode, uuid));
+                            Redis.handleStatusCode(apiResponseCode, uuid);
                             response.status(responseCode);
                         }
                         sessionResponse.close();
                     }
+                    Ratelimit.remove(uuid);
                 }
                 else{
                     Redis.handleStatusCode(apiResponseCode, name);
-                    System.out.println("Served profile lookup for name " + name + " (" + apiResponse.code() + ")");
+                    System.out.println("Served profile for name " + name + " (" + apiResponse.code() + ")");
                 }
                 apiResponse.close();
             }
 
             response.type("Application/json");
-            return json;
+            Ratelimit.remove(name);
+            if(texturesOnly && !json.isEmpty()) return Utils.getTextures(json);
+            else return json;
         });
 
         Spark.get("/stats", (request, response) -> {
@@ -295,6 +304,7 @@ public class MojangPipe {
                 "            <tr><td>Time started</td><td> "+new SimpleDateFormat("yyyy-MM-dd HH:mm").format(new Date(startTime))+"</td></tr>\n" +
                 "            <tr><td>429 hit rate</td><td> "+Redis.get429Percentage()+"%</td></tr>\n"+
                 "            <tr><td>Proxy in rotation</td><td> "+((InetSocketAddress) client.proxy().address()).getPort()+"</td></tr>\n"+
+                "            <tr><td>Requests in progress</td><td> "+Ratelimit.getRequestsInProgress().size()+"</td></tr>\n"+
                 "            <tr><td>Used memory</td><td> "+Utils.readableFileSize(Runtime.getRuntime().totalMemory()-Runtime.getRuntime().freeMemory())+"</td></tr>\n"+
                 "            <tr><td>----------------------------------------</td><td>-----------------------</td></tr>\n"+
                 "            <tr><td>Requests served from memory&nbsp;&nbsp;</td><td> "+Redis.getRequestsFromMemory()+"</td></tr>\n" +
@@ -318,11 +328,13 @@ public class MojangPipe {
                 "    </body>\n" +
                 "</html>";
         });
+        Spark.after("/*", ((request, response) -> response.header("Server", "MojangPipe/2.2")));
         Spark.exception(Exception.class, (e, req, res) -> e.printStackTrace());
         Spark.awaitInitialization();
 
         threadPool.scheduleAtFixedRate(MojangPipe::newProxy, 5, 5, TimeUnit.MINUTES);
     }
+
     static RedisCommands<String, String> getRedis(){
         return redis;
     }
