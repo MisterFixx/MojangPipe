@@ -27,7 +27,7 @@ public class MojangPipe {
     private static long startTime;
     private static OkHttpClient client;
     private static RedisCommands<String, String> redis;
-    private static final ScheduledExecutorService threadPool = Executors.newScheduledThreadPool(300);
+    private static final ScheduledExecutorService threadPool = Executors.newScheduledThreadPool(2);
     private static final String API_URL = "https://api.mojang.com/users/profiles/minecraft/";
     private static final String SESSION_URL = "https://sessionserver.mojang.com/session/minecraft/profile/";
 
@@ -52,10 +52,7 @@ public class MojangPipe {
         Redis.init();
         client = Utils.getClient();
 
-        System.out.println("Starting relay server on port "+options.valueOf(optPort));
         Spark.port(options.valueOf(optPort));
-        Spark.threadPool(300, 20, 5000);
-
         Spark.get("/sessionserver/*", (request, response) -> {
             if(request.splat().length == 0) halt(400);
             String[] route = request.splat()[0].split("/");
@@ -70,17 +67,13 @@ public class MojangPipe {
 
             if((time - Redis.getLastRequest(uuid, 5)) < (invalidLifetime * 60000)){
                 response.status(204);
-                threadPool.execute(() -> {
-                    Redis.incrStats("served_from_invalid_cache");
-                    System.out.println("Served profile for UUID "+uuid+" (from invalid requests cache)");
-                });
+                Redis.incrStats("served_from_invalid_cache");
+                System.out.println("Served profile for UUID "+uuid+" (from invalid requests cache)");
             }
             else if((time - Redis.getLastRequest(uuid,1)) < (cacheLifetime * 60000)){
                 json = Redis.getJson(uuid, 1);
-                threadPool.execute(()->{
-                    Redis.incrStats("profile_from_mem");
-                    System.out.println("Served profile for UUID "+uuid+" (from memory)");
-                });
+                Redis.incrStats("profile_from_mem");
+                System.out.println("Served profile for UUID "+uuid+" (from memory)");
             }
             else {
                 Request apiRequest = new Request.Builder().url(SESSION_URL+uuid).build();
@@ -88,12 +81,9 @@ public class MojangPipe {
                 int responseCode = apiResponse.code();
                 ResponseBody body = apiResponse.body();
 
-                threadPool.execute(()->{
-                    String statusMessage = responseCode+" "+apiResponse.message();
-                    Redis.incrStats("profile_from_api");
-                    Redis.logStatusMessage(statusMessage);
-                    System.out.println("Served profile for UUID "+uuid+" ("+responseCode+")");
-                });
+                Redis.incrStats("profile_from_api");
+                Redis.logStatusMessage(responseCode+" "+apiResponse.message());
+                System.out.println("Served profile for UUID "+uuid+" ("+responseCode+")");
                 if(body != null && responseCode == 200){
                     json = body.string();
                     Redis.putJson(uuid, time, json, 1);
@@ -119,17 +109,13 @@ public class MojangPipe {
 
             if((time - Redis.getLastRequest(name, 5)) < (invalidLifetime * 60000)){
                 response.status(204);
-                threadPool.execute(() -> {
-                    Redis.incrStats("served_from_invalid_cache");
-                    System.out.println("Served UUID lookup for username " + name + " (from invalid requests cache)");
-                });
+                Redis.incrStats("served_from_invalid_cache");
+                System.out.println("Served UUID lookup for username " + name + " (from invalid requests cache)");
             }
             else if((time - Redis.getLastRequest(name, 2)) < (cacheLifetime * 60000)){
                 json = Redis.getJson(name, 2);
-                threadPool.execute(()->{
-                    Redis.incrStats("uuid_from_mem");
-                    System.out.println("Served UUID lookup for username "+name+" (from memory)");
-                });
+                Redis.incrStats("uuid_from_mem");
+                System.out.println("Served UUID lookup for username "+name+" (from memory)");
             }
             else{
                 Request apiRequest = new Request.Builder().url(API_URL+name).build();
@@ -137,12 +123,9 @@ public class MojangPipe {
                 int responseCode = apiResponse.code();
                 ResponseBody body = apiResponse.body();
 
-                threadPool.execute(()->{
-                    String statusMessage = responseCode+" "+apiResponse.message();
-                    Redis.incrStats("uuid_from_api");
-                    Redis.logStatusMessage(statusMessage);
-                    System.out.println("Served UUID lookup for username "+name+" ("+responseCode+")");
-                });
+                Redis.incrStats("uuid_from_api");
+                Redis.logStatusMessage(responseCode+" "+apiResponse.message());
+                System.out.println("Served UUID lookup for username "+name+" ("+responseCode+")");
                 if(body != null && responseCode == 200){
                     json = body.string();
                     Redis.putJson(name, time, json, 2);
@@ -166,17 +149,13 @@ public class MojangPipe {
 
             if((time - Redis.getLastRequest(uuid, 5)) < (invalidLifetime * 60000)){
                 response.status(204);
-                threadPool.execute(() -> {
-                    Redis.incrStats("served_from_invalid_cache");
-                    System.out.println("Served names list for UUID " + uuid + " (from invalid requests cache)");
-                });
+                Redis.incrStats("served_from_invalid_cache");
+                System.out.println("Served names list for UUID " + uuid + " (from invalid requests cache)");
             }
             else if((time - Redis.getLastRequest(uuid, 3)) < (cacheLifetime * 60000)){
                 json = Redis.getJson(uuid, 3);
-                threadPool.execute(()->{
-                    Redis.incrStats("names_from_mem");
-                    System.out.println("Served names list for UUID "+uuid+" (from memory)");
-                });
+                Redis.incrStats("names_from_mem");
+                System.out.println("Served names list for UUID "+uuid+" (from memory)");
             }
             else{
                 Request apiRequest = new Request.Builder().url("https://api.mojang.com/user/profiles/"+uuid+"/names").build();
@@ -184,12 +163,9 @@ public class MojangPipe {
                 int responseCode = apiResponse.code();
                 ResponseBody body = apiResponse.body();
 
-                threadPool.execute(()->{
-                    String statusMessage = responseCode+" "+apiResponse.message();
-                    Redis.incrStats("names_from_api");
-                    Redis.logStatusMessage(statusMessage);
-                    System.out.println("Served names list for UUID "+uuid+" ("+responseCode+")");
-                });
+                Redis.incrStats("names_from_api");
+                Redis.logStatusMessage(responseCode+" "+apiResponse.message());
+                System.out.println("Served names list for UUID "+uuid+" ("+responseCode+")");
                 if(body != null && responseCode == 200){
                     json = body.string();
                     Redis.putJson(uuid, time, json, 3);
@@ -219,17 +195,13 @@ public class MojangPipe {
 
             if((time - Redis.getLastRequest(name, 5)) < (invalidLifetime * 60000)){
                 response.status(204);
-                threadPool.execute(() -> {
-                    Redis.incrStats("served_from_invalid_cache");
-                    System.out.println("Served profile for name " + name + " (from invalid requests cache)");
-                });
+                Redis.incrStats("served_from_invalid_cache");
+                System.out.println("Served profile for name " + name + " (from invalid requests cache)");
             }
             else if((time - Redis.getLastRequest(name, 4)) < (cacheLifetime * 60000)){
                 json = Redis.getJson(name, 4);
-                threadPool.execute(() -> {
-                    Redis.incrStats("name_profile_from_mem");
-                    System.out.println("Served profile for name " + name + " (from memory)");
-                });
+                Redis.incrStats("name_profile_from_mem");
+                System.out.println("Served profile for name " + name + " (from memory)");
             }
             else {
                 Request apiRequest = new Request.Builder().url(API_URL+name).build();
@@ -237,20 +209,18 @@ public class MojangPipe {
                 ResponseBody apiBody = apiResponse.body();
                 int apiResponseCode = apiResponse.code();
 
-                threadPool.execute(() -> Redis.logStatusMessage(apiResponseCode+" "+apiResponse.message()));
+                Redis.logStatusMessage(apiResponseCode+" "+apiResponse.message());
                 if(apiBody != null && apiResponseCode == 200){
                     String responseString = apiBody.string();
-                    threadPool.execute(() -> Redis.putJson(name, time, responseString, 2));
+                    Redis.putJson(name, time, responseString, 2);
                     String uuid = new JSONObject(responseString).getString("id");
                     Ratelimit.add(uuid);
 
                     if((time - Redis.getLastRequest(uuid, 1)) < (cacheLifetime * 60000)){
                         json = Redis.getJson(uuid, 1);
                         Redis.putJson(name, time, json, 4);
-                        threadPool.execute(() -> {
-                            Redis.incrStats("uuid_from_mem");
-                            System.out.println("Served profile for name "+name+" (partly from memory)");
-                        });
+                        Redis.incrStats("uuid_from_mem");
+                        System.out.println("Served profile for name "+name+" (partly from memory)");
                     }
                     else {
                         Request sessionRequest = new Request.Builder().url(SESSION_URL+uuid).build();
@@ -258,11 +228,9 @@ public class MojangPipe {
                         int responseCode = sessionResponse.code();
                         ResponseBody sessionBody = sessionResponse.body();
 
-                        threadPool.execute(() -> {
-                            Redis.incrStats("name_profile_from_api");
-                            Redis.logStatusMessage(sessionResponse.code()+" "+sessionResponse.message());
-                            System.out.println("Served profile for name "+name+" ("+responseCode+")");
-                        });
+                        Redis.incrStats("name_profile_from_api");
+                        Redis.logStatusMessage(sessionResponse.code()+" "+sessionResponse.message());
+                        System.out.println("Served profile for name "+name+" ("+responseCode+")");
                         if(sessionBody != null && responseCode == 200){
                             json = sessionBody.string();
                             Redis.putJson(name, time, json, 4);
@@ -328,14 +296,28 @@ public class MojangPipe {
                 "    </body>\n" +
                 "</html>";
         });
-        Spark.after("/*", ((request, response) -> response.header("Server", "MojangPipe/2.2")));
+        Spark.after("/*", ((request, response) -> response.header("Server", "MojangPipe/2.3")));
         Spark.exception(Exception.class, (e, req, res) -> e.printStackTrace());
         Spark.awaitInitialization();
 
-        threadPool.scheduleAtFixedRate(MojangPipe::newProxy, 5, 5, TimeUnit.MINUTES);
+        threadPool.scheduleAtFixedRate(()->{
+            Ratelimit.getRequestsInProgress().forEach((key, value)->{
+                if((System.currentTimeMillis() - value) > 1000){
+                    Ratelimit.remove(key);
+                }
+            });
+            newProxy();
+        }, 5, 5, TimeUnit.MINUTES);
     }
 
     static RedisCommands<String, String> getRedis(){
+        while(Redis.isConnectionBusy()){
+            try {
+                Thread.sleep(1);
+            } catch(InterruptedException e){
+                e.printStackTrace();
+            }
+        }
         return redis;
     }
     static void newProxy(){

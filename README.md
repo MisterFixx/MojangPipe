@@ -29,7 +29,7 @@ Since Squid is configured to send requests through each one of its IPs depending
 
 Performance
 ===========
-Currently, in the production environment, this system has managed to reduce the rate of `429` status codes from 6% (of all outgoing requests to Mojang), to 0.8 - 0.25%.
+Currently, in the production environment, this system has managed to reduce the rate of `429` status codes from 6% (of all outgoing requests to Mojang), to 0.5 - 0.02%.
 
 # Contributing
 To contribute:

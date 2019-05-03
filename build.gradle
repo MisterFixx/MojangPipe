@@ -5,7 +5,7 @@ plugins {
 }
 
 group 'io.misterfix.mojangpipe'
-version '2.2'
+version '2.3'
 
 sourceCompatibility = 11
 mainClassName = 'io.misterfix.mojangpipe.MojangPipe'

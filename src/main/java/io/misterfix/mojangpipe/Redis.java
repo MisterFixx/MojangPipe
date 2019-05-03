@@ -8,10 +8,12 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 
 class Redis {
+    private static boolean connectionBusy = false;
     static void init(){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
         //Flushing the database and putting in default values as a lazy way to avoid NullPointerExceptions
         redis.flushall();
+        redis.select(0);
         //List of ports on which Squid is running.
         //Each port corresponds to a different ext. IP address through which a request could be made.
         redis.hmset("proxies", Map.of(
@@ -43,53 +45,75 @@ class Redis {
     //=====================STATISTICS METHODS=====================//
     static int getRequestsFromMemory(){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
+        connectionBusy = true;
         redis.select(0);
-        return Integer.parseInt(redis.hget("stats", "profile_from_mem")) + Integer.parseInt(redis.hget("stats", "uuid_from_mem")) + Integer.parseInt(redis.hget("stats", "names_from_mem")) + Integer.parseInt(redis.hget("stats", "name_profile_from_mem")) + Integer.parseInt(redis.hget("stats", "served_from_invalid_cache"));
+        int stat = Integer.parseInt(redis.hget("stats", "profile_from_mem")) + Integer.parseInt(redis.hget("stats", "uuid_from_mem")) + Integer.parseInt(redis.hget("stats", "names_from_mem")) + Integer.parseInt(redis.hget("stats", "name_profile_from_mem")) + Integer.parseInt(redis.hget("stats", "served_from_invalid_cache"));
+        connectionBusy = false;
+        return stat;
     }
 
     static int getRequestsFromApi(){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
+        connectionBusy = true;
         redis.select(0);
-        return Integer.parseInt(redis.hget("stats", "profile_from_api")) + Integer.parseInt(redis.hget("stats", "uuid_from_api")) + Integer.parseInt(redis.hget("stats", "names_from_api")) + Integer.parseInt(redis.hget("stats", "name_profile_from_api"));
+        int stat = Integer.parseInt(redis.hget("stats", "profile_from_api")) + Integer.parseInt(redis.hget("stats", "uuid_from_api")) + Integer.parseInt(redis.hget("stats", "names_from_api")) + Integer.parseInt(redis.hget("stats", "name_profile_from_api"));
+        connectionBusy = false;
+        return stat;
     }
 
     static int getOutgoingRequests(){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
-        redis.select(0);
         AtomicInteger outgoingRequests = new AtomicInteger();
+        connectionBusy = true;
+        redis.select(0);
         redis.hgetall("statusCodes").forEach((code, count) -> outgoingRequests.getAndAdd(Integer.parseInt(count)));
+        connectionBusy = false;
         return outgoingRequests.get();
     }
 
     static int getProfileRequestsCount(){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
+        connectionBusy = true;
         redis.select(0);
-        return Integer.parseInt(redis.hget("stats", "profile_from_api")) + Integer.parseInt(redis.hget("stats", "profile_from_mem"));
+        int stat = Integer.parseInt(redis.hget("stats", "profile_from_api")) + Integer.parseInt(redis.hget("stats", "profile_from_mem"));
+        connectionBusy = false;
+        return stat;
     }
 
     static int getNameRequestsCount(){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
+        connectionBusy = true;
         redis.select(0);
-        return Integer.parseInt(redis.hget("stats", "uuid_from_api")) + Integer.parseInt(redis.hget("stats", "uuid_from_mem"));
+        int stat = Integer.parseInt(redis.hget("stats", "uuid_from_api")) + Integer.parseInt(redis.hget("stats", "uuid_from_mem"));
+        connectionBusy = false;
+        return stat;
     }
 
     static int getNamesRequestsCount(){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
+        connectionBusy = true;
         redis.select(0);
-        return Integer.parseInt(redis.hget("stats", "names_from_api")) + Integer.parseInt(redis.hget("stats", "names_from_mem"));
+        int stat = Integer.parseInt(redis.hget("stats", "names_from_api")) + Integer.parseInt(redis.hget("stats", "names_from_mem"));
+        connectionBusy = false;
+        return stat;
     }
 
     static int getNameProfileRequestsCount(){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
+        connectionBusy = true;
         redis.select(0);
-        return Integer.parseInt(redis.hget("stats", "name_profile_from_api")) + Integer.parseInt(redis.hget("stats", "name_profile_from_mem"));
+        int stat = Integer.parseInt(redis.hget("stats", "name_profile_from_api")) + Integer.parseInt(redis.hget("stats", "name_profile_from_mem"));
+        connectionBusy = false;
+        return stat;
     }
 
     static String get429Percentage(){
         DecimalFormat formatter = new DecimalFormat(".###");
         RedisCommands<String, String> redis = MojangPipe.getRedis();
+        connectionBusy = true;
         redis.select(0);
         String redisQuery = redis.hget("statusCodes", "429 429");
+        connectionBusy = false;
         if(redisQuery == null){
             return "0.000";
         }
@@ -100,48 +124,65 @@ class Redis {
 
     static int dbsize(int db){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
+        connectionBusy = true;
         redis.select(db);
-        return redis.dbsize().intValue();
+        int size = redis.dbsize().intValue();
+        connectionBusy = false;
+        return size;
     }
 
     private static void logInvalidRequest(String identifier, long time){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
+        connectionBusy = true;
         redis.select(5);
         redis.hmset(identifier, Map.of("time", Long.toString(time)));
+        connectionBusy = false;
     }
 
     static void logStatusMessage(String statusMessage){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
+        connectionBusy = true;
         redis.select(0);
         redis.hincrby("statusCodes", statusMessage, 1);
+        connectionBusy = false;
     }
 
     static void incrStats(String stat){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
+        connectionBusy = true;
         redis.select(0);
         redis.hincrby("stats", stat, 1);
+        connectionBusy = false;
     }
 
     //=================NORMAL OPERATIONS METHODS=================//
     static long getLastRequest(String identifier, int dbIndex){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
+        connectionBusy = true;
         redis.select(dbIndex);
         String result = redis.hmget(identifier, "time").get(0).getValueOrElse("0");
+        connectionBusy = false;
         return Long.valueOf(result);
     }
 
     static String getJson(String identifier, int dbIndex){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
+        connectionBusy = true;
         redis.select(dbIndex);
         String result = redis.hmget(identifier, "json").get(0).getValueOrElse("");
+        connectionBusy = false;
         return Objects.requireNonNullElse(result, "");
     }
 
     static void putJson(String identifier, long time, String json, int dbIndex){
         RedisCommands<String, String> redis = MojangPipe.getRedis();
-        String timeStr = String.valueOf(time);
+        connectionBusy = true;
         redis.select(dbIndex);
-        redis.hmset(identifier, Map.of("time", timeStr, "json", json));
+        redis.hmset(identifier, Map.of(
+                "time", String.valueOf(time),
+                "json", json
+        ));
+        connectionBusy = false;
     }
 
     static void handleStatusCode(int code, String identifier){
@@ -150,5 +191,9 @@ class Redis {
         } else {
             MojangPipe.newProxy();
         }
+    }
+
+    static boolean isConnectionBusy(){
+        return connectionBusy;
     }
 }

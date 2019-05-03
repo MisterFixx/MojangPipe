@@ -1,19 +1,18 @@
 package io.misterfix.mojangpipe;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 class Ratelimit {
-    private static List<String> requestsInProgress = Collections.synchronizedList(new ArrayList<>());
+    private static Map<String, Long> requestsInProgress = new ConcurrentHashMap<>();
 
     static void checkAndAdd(String identifier) throws InterruptedException{
-        if(requestsInProgress.contains(identifier)){
-            while(requestsInProgress.contains(identifier)){
-                Thread.sleep(8);
+        if(requestsInProgress.containsKey(identifier)){
+            while(requestsInProgress.containsKey(identifier)){
+                Thread.sleep(5);
             }
         }
-        requestsInProgress.add(identifier);
+        requestsInProgress.put(identifier, System.currentTimeMillis());
     }
 
     static void remove(String identifier){
@@ -21,10 +20,10 @@ class Ratelimit {
     }
 
     static void add(String identifier){
-        requestsInProgress.add(identifier);
+        requestsInProgress.put(identifier, System.currentTimeMillis());
     }
 
-    static List<String> getRequestsInProgress(){
+    static Map<String, Long> getRequestsInProgress(){
         return requestsInProgress;
     }
 }
