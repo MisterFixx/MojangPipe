@@ -23,23 +23,27 @@ class Utils {
         int minKey = 0;
         long minValue = Long.MAX_VALUE;
         for (String key : keys) {
-            long value = Long.valueOf(map.get(key));
+            long value = Long.parseLong(map.get(key));
             if(value < minValue) {
                 minValue = value;
-                minKey = Integer.valueOf(key);
+                minKey = Integer.parseInt(key);
             }
         }
         return minKey;
     }
 
     static OkHttpClient getClient(){
-        RedisCommands<String, String> redis = MojangPipe.getRedis();
-        redis.select(0);
-        Map<String, String> proxies = redis.hgetall("proxies");
         OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder();
+        String timeStr = Long.toString(System.currentTimeMillis());
+
+        RedisCommands<String, String> redis = MojangPipe.getRedis(0);
+        Redis.setConnectionBusy(0,true);
+        Map<String, String> proxies = redis.hgetall("proxies");
         int proxy = getOptimalProxy(proxies, proxies.keySet());
+        redis.hmset("proxies", Map.of(String.valueOf(proxy), timeStr));
+        Redis.setConnectionBusy(0,false);
+
         clientBuilder.proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress("127.0.0.1", proxy)));
-        redis.hmset("proxies", Map.of(String.valueOf(proxy), Long.toString(System.currentTimeMillis())));
         return clientBuilder.build();
     }
 

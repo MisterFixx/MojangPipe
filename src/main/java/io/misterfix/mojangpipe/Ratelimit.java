@@ -7,10 +7,8 @@ class Ratelimit {
     private static Map<String, Long> requestsInProgress = new ConcurrentHashMap<>();
 
     static void checkAndAdd(String identifier) throws InterruptedException{
-        if(requestsInProgress.containsKey(identifier)){
-            while(requestsInProgress.containsKey(identifier)){
-                Thread.sleep(5);
-            }
+        while(requestsInProgress.containsKey(identifier)){
+            Thread.sleep(1);
         }
         requestsInProgress.put(identifier, System.currentTimeMillis());
     }
