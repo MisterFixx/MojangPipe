@@ -5,7 +5,7 @@ import com.typesafe.config.ConfigFactory;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.api.StatefulRedisConnection;
-import okhttp3.OkHttpClient;
+import okhttp3.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import spark.Spark;
@@ -31,20 +31,23 @@ public class MojangPipe {
 	private static LongAdder totalOutgoingRequests = new LongAdder();
 	private static LongAdder requestsServed = new LongAdder();
 	private static String currentInterface = "";
-	private static DataFetcher dataFetcher = null;
+	private static final String NAME_URL = "https://api.mojang.com/profiles/minecraft";
+	private static final String NAMES_URL = "https://api.mojang.com/user/profiles/";
+	private static final String SESSION_URL = "https://sessionserver.mojang.com/session/minecraft/profile/";
+	private static Request.Builder NAME_REQUEST = new Request.Builder().url(NAME_URL);
+	private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("Application/json");
 
 	private static int cacheLifetime = 0;
 	private static int invalidLifetime = 0;
 	private static int maxRequestsPerInterface = 0;
-	private static int port = 0;
-	
+
 	public static void main(String[] args) {
 		startTime = System.currentTimeMillis();
 		Config conf = ConfigFactory.load();
 		cacheLifetime = conf.getInt("profileLifetime")*60000;
 		invalidLifetime = conf.getInt("invalidProfileLifetime")*60000;
 		maxRequestsPerInterface = conf.getInt("maxRequestsPerInterface");
-		port = conf.getInt("port");
+		int port = conf.getInt("port");
 		String redisHost = conf.getString("redisHost");
 		String redisPass = conf.getString("redisPass");
 		int redisPort = conf.getInt("redisPort");
@@ -55,10 +58,9 @@ public class MojangPipe {
 			StatefulRedisConnection<String, String> connection = redisClient.connect();
 			new WrappedRedis(connection.sync()).close();
 		}
-		//Redis.init(conf.getStringList("outgoingNetworkInterfaces"));
+		Redis.init(conf.getStringList("outgoingNetworkInterfaces"));
 
 		client = Networking.getClient();
-		dataFetcher = new DataFetcher(cacheLifetime);
 
 		Spark.port(port);
 		Spark.exception(Exception.class, (e, request, response) -> {
@@ -77,18 +79,19 @@ public class MojangPipe {
 		});
 
 		Spark.get("/profile/*", (request, response) -> {
-			String[] route = request.splat();
+			String[] route = request.splat()[0].split("/");
 			if (route.length == 0) halt(204);
 			String identifier = route[0];
 			Ratelimit.checkAndAdd(identifier);
+			long time = Utils.now();
 
-			if (Redis.isInvalidIdentifier(identifier, Utils.now())) {
+			if (Redis.isInvalidIdentifier(identifier, time)) {
 				Redis.incrStats("from_invalid_cache");
 				halt(204);
 			}
 
 			int identifierType = identifier.length() == 32 ? 1 : 0;
-			String json;
+			String json = "";
 			int requestType = 0;
 			if (route.length == 2) {
 					if ("textures".equals(route[1])) {
@@ -100,19 +103,122 @@ public class MojangPipe {
 
 			//Identifier is a UUID
 			if (identifierType == 1) {
-				json = dataFetcher.getProfileByUuid(identifier, response, false);
+				CachedResponse cachedResponse = new CachedResponse(identifier, 1);
+				if ((time - cachedResponse.getLastRequest()) < cacheLifetime) {
+					Redis.incrStats("profile_from_mem");
+					json = cachedResponse.getJson();
+					cachedResponse.close();
+				}
+				else {
+					Request apiRequest = new Request.Builder().url(SESSION_URL + identifier).build();
+					Response apiResponse = getClient().newCall(apiRequest).execute();
+					int responseCode = apiResponse.code();
+					ResponseBody body = apiResponse.body();
+					if (body != null) {
+						json = body.string();
+					}
+					apiResponse.close();
+
+					Redis.incrStats("profile_from_api", responseCode);
+					if (responseCode == 200) {
+						Redis.putJson(identifier, time, json, 1);
+					}
+					else {
+						Redis.handleStatusCode(responseCode, identifier);
+						response.status(responseCode);
+					}
+				}
 			}
 			//Identifier is a username
 			else {
-				json = dataFetcher.getProfileByName(identifier, response, false);
+				CachedResponse profileCachedResponse = new CachedResponse(identifier, 4);
+				if ((time - profileCachedResponse.getLastRequest()) < cacheLifetime) {
+					Redis.incrStats("profile_from_mem");
+					json = profileCachedResponse.getJson();
+					profileCachedResponse.close();
+				}
+				else {
+					String responseString = "";
+					Request apiRequest = NAME_REQUEST.post(RequestBody.create(new JSONArray().put(identifier).toString(), JSON_MEDIA_TYPE)).build();
+					Response apiResponse = getClient().newCall(apiRequest).execute();
+					ResponseBody apiBody = apiResponse.body();
+					int apiResponseCode = apiResponse.code();
+					if (apiBody != null) {
+						responseString = apiBody.string();
+					}
+					apiResponse.close();
+
+					Redis.logStatusCode(apiResponseCode);
+					if (apiResponseCode == 200) {
+						if(responseString.equals("[]")){
+							Redis.logInvalidRequest(identifier, time);
+							halt(204);
+						}
+						String uuid = new JSONArray(responseString).getJSONObject(0).getString("id");
+						Redis.putJson(identifier, time, responseString, 2);
+						CachedResponse nameCachedResponse = new CachedResponse(uuid, 1);
+						if ((time - nameCachedResponse.getLastRequest()) < cacheLifetime) {
+							json = nameCachedResponse.getJson();
+							Redis.putJson(identifier, time, json, 4);
+							nameCachedResponse.close();
+						}
+						else {
+							Request sessionRequest = new Request.Builder().url(SESSION_URL + uuid).build();
+							Response sessionResponse = getClient().newCall(sessionRequest).execute();
+							int responseCode = sessionResponse.code();
+							ResponseBody sessionBody = sessionResponse.body();
+							if (sessionBody != null) {
+								json = sessionBody.string();
+							}
+							sessionResponse.close();
+
+							Redis.incrStats("profile_from_api", sessionResponse.code());
+							if (responseCode == 200) {
+								Redis.putJson(identifier, time, json, 4);
+								Redis.putJson(uuid, time, json, 1);
+							}
+							else {
+								Redis.handleStatusCode(apiResponseCode, identifier);
+								Redis.handleStatusCode(apiResponseCode, uuid);
+								response.status(responseCode);
+							}
+						}
+					}
+					else {
+						Redis.handleStatusCode(apiResponseCode, identifier);
+					}
+				}
 			}
 			//Add name history to profile if necessary
 			if (requestType == 2) {
-				//not quite sure what's going on here
 				if (!json.isEmpty() && json.startsWith("{")) {
 					JSONObject profile = new JSONObject(json);
 					String uuid = profile.getString("id");
-					String names = dataFetcher.getNameHistory(uuid, response,false,false);
+					String names = "";
+					CachedResponse cachedResponse = new CachedResponse(uuid, 3);
+					if ((time - cachedResponse.getLastRequest()) < cacheLifetime) {
+						Redis.incrStats("names_from_mem");
+						names =  cachedResponse.getJson();
+						cachedResponse.close();
+					}
+					else {
+						Request apiRequest = new Request.Builder().url(NAMES_URL + uuid + "/names").build();
+						Response apiResponse = getClient().newCall(apiRequest).execute();
+						int responseCode = apiResponse.code();
+						ResponseBody body = apiResponse.body();
+						if (body != null) {
+							names = body.string();
+						}
+						apiResponse.close();
+
+						Redis.incrStats("names_from_api", responseCode);
+						if (responseCode == 200) {
+							Redis.putJson(uuid, time, names, 3);
+						}
+						else {
+							Redis.handleStatusCode(responseCode, uuid);
+						}
+					}
 					if(!names.isEmpty()){
 						profile.put("name_history", new JSONArray(names));
 					}
@@ -126,7 +232,7 @@ public class MojangPipe {
 			Ratelimit.remove(identifier);
 			System.out.println("Served profile for identifier "+identifier+" ("+response.status()+")");
 			if (requestType == 1 && !json.isEmpty()) {
-				return dataFetcher.getTextures(json);
+				return Utils.getTextures(json);
 			}
 			else {
 				return json;
@@ -134,14 +240,81 @@ public class MojangPipe {
 		});
 		Spark.get("/name/:name", (request, response) -> {
 			String name = request.params(":name");
-			String json = dataFetcher.getUuidByName(name, response);
+			long time = Utils.now();
+			String json = "";
+			if (Redis.isInvalidIdentifier(name, time)) {
+				Redis.incrStats("from_invalid_cache");
+				Spark.halt(204);
+			}
+			CachedResponse cachedResponse = new CachedResponse(name, 2);
+			if ((time - cachedResponse.getLastRequest()) < cacheLifetime) {
+				Redis.incrStats("uuid_from_mem");
+				json = cachedResponse.getJson();
+				cachedResponse.close();
+			}
+			else {
+				Request apiRequest = NAME_REQUEST.post(RequestBody.create(new JSONArray().put(name).toString(), JSON_MEDIA_TYPE)).build();
+				Response apiResponse = getClient().newCall(apiRequest).execute();
+				int responseCode = apiResponse.code();
+				ResponseBody body = apiResponse.body();
+				if (body != null) {
+					json = body.string();
+				}
+				apiResponse.close();
+
+				Redis.incrStats("uuid_from_api", responseCode);
+				if (responseCode == 200) {
+					if(json.equals("[]")){
+						Redis.logInvalidRequest(name, time);
+						halt(204);
+					}
+					json = new JSONArray(json).getJSONObject(0).toString();
+					Redis.putJson(name, time, json, 2);
+				}
+				else {
+					Redis.handleStatusCode(responseCode, name);
+					response.status(responseCode);
+				}
+			}
+
 			System.out.println("Served UUID for name "+name+" ("+response.status()+")");
 			return json;
 		});
 		Spark.get("/names/:uuid", (request, response) -> {
 			String uuid = request.params(":uuid");
 			if (uuid.length() != 32) halt(204);
-			String json = dataFetcher.getNameHistory(uuid, response, true, true);
+
+			String json = "";
+			long time = Utils.now();
+			if (Redis.isInvalidIdentifier(uuid, time)) {
+				Redis.incrStats("from_invalid_cache");
+				Spark.halt(204);
+			}
+			CachedResponse cachedResponse = new CachedResponse(uuid, 3);
+			if ((time - cachedResponse.getLastRequest()) < cacheLifetime) {
+				Redis.incrStats("names_from_mem");
+				json = cachedResponse.getJson();
+				cachedResponse.close();
+			}
+			else {
+				Request apiRequest = new Request.Builder().url(NAMES_URL + uuid + "/names").build();
+				Response apiResponse = getClient().newCall(apiRequest).execute();
+				int responseCode = apiResponse.code();
+				ResponseBody body = apiResponse.body();
+				if (body != null) {
+					json = body.string();
+				}
+				apiResponse.close();
+
+				Redis.incrStats("names_from_api", responseCode);
+				if (responseCode == 200) {
+					Redis.putJson(uuid, time, json, 3);
+				}
+				else {
+					Redis.handleStatusCode(responseCode, uuid);
+					response.status(responseCode);
+				}
+			}
 			System.out.println("Served names list for UUID "+uuid+" ("+response.status()+")");
 			return json;
 		});
@@ -222,7 +395,7 @@ public class MojangPipe {
 		}
 		totalOutgoingRequests.increment();
 	}
-	static OkHttpClient getClient() {
+	private static OkHttpClient getClient() {
 		return client;
 	}
 }

@@ -1,6 +1,9 @@
 package io.misterfix.mojangpipe;
 
+import org.json.JSONObject;
+
 import java.text.DecimalFormat;
+import java.util.Base64;
 import java.util.Map;
 
 class Utils {
@@ -26,5 +29,24 @@ class Utils {
 	}
 	static long now(){
 		return System.currentTimeMillis();
+	}
+	static String getTextures(String json) {
+		JSONObject responseJson = new JSONObject();
+		JSONObject profile = new JSONObject(json);
+		String data = profile.getJSONArray("properties").getJSONObject(0).getString("value");
+		String base64 = new String(Base64.getDecoder().decode(data));
+		JSONObject textures = new JSONObject(base64).getJSONObject("textures");
+		responseJson.put("uuid", profile.getString("id"));
+		responseJson.put("name", profile.getString("name"));
+		if (!textures.isNull("SKIN")) {
+			responseJson.put("skin", textures.getJSONObject("SKIN").getString("url"));
+		}
+		if (!textures.isNull("CAPE")) {
+			responseJson.put("cape", textures.getJSONObject("CAPE").getString("url"));
+		}
+		if (!profile.isNull("legacy")) {
+			responseJson.put("legacy", true);
+		}
+		return responseJson.toString();
 	}
 }
