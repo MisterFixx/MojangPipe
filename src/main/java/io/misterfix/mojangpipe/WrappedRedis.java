@@ -10,18 +10,14 @@ public class WrappedRedis implements AutoCloseable {
 	private final RedisCommands<String, String> redis;
 	private boolean busy;
 	
-	public WrappedRedis(RedisCommands<String, String> redis) {
+	WrappedRedis(RedisCommands<String, String> redis) {
 		this.redis = redis;
 		databases.add(this);
 	}
-	
-	
-	
-	public RedisCommands<String, String> get() {
+	RedisCommands<String, String> get() {
 		return redis;
 	}
-	
-	public static WrappedRedis get(int db) {
+	static WrappedRedis get(int db) {
 		WrappedRedis redis = databases.get(db);
 		synchronized (redis) {
 			if (redis.busy) {
@@ -35,7 +31,6 @@ public class WrappedRedis implements AutoCloseable {
 		}
 		return redis;
 	}
-	
 	@Override
 	public synchronized void close() {
 		busy = false;
